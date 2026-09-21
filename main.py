@@ -1,16 +1,36 @@
-
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
 import pandas as pd
 
+# Create FastAPI application
 app = FastAPI(
-    title="Skin Clinic Campaign Analysis",
-    description="Analysis of customer response to a skin clinic marketing campaign"
+    title="Skin Clinic Campaign Analysis API",
+    description="Customer campaign response analysis",
+    version="1.0"
 )
 
+# --------------------------------------------------
 # Load dataset
+# --------------------------------------------------
+
 df = pd.read_csv("skin_clinic_campaign.csv")
 
+# Convert campaign response from Yes/No to 1/0
+# Yes = 1
+# No = 0
+
+df["Response_Flag"] = (
+    df["Response_to_Campaign"]
+    .astype(str)
+    .str.strip()
+    .str.lower()
+    .eq("yes")
+    .astype(int)
+)
+
+
+# --------------------------------------------------
+# Home endpoint
+# --------------------------------------------------
 
 @app.get("/")
 def home():
@@ -20,170 +40,120 @@ def home():
     }
 
 
-@app.get("/campaign-analysis", response_class=HTMLResponse)
+# --------------------------------------------------
+# Campaign Analysis endpoint
+# --------------------------------------------------
+
+@app.get("/campaign-analysis")
 def campaign_analysis():
 
-    # ----------------------------------------
+    # ==================================================
     # 1. Gender vs Campaign Response
-    # ----------------------------------------
+    # ==================================================
 
-    gender_response = (
-        df.groupby("Gender")["Response_to_Campaign"]
-        .mean()
-        .mul(100)
-        .round(2)
+    gender = (
+        df.groupby("Gender")
+        .agg(
+            Total_Customers=("CustID", "count"),
+            Responded=("Response_Flag", "sum"),
+            Response_Rate=("Response_Flag", "mean")
+        )
         .reset_index()
     )
 
-    gender_response.columns = [
-        "Gender",
-        "Response Rate (%)"
-    ]
+    # Convert response rate to percentage
+    gender["Response_Rate"] = (
+        gender["Response_Rate"] * 100
+    ).round(2)
 
 
-    # ----------------------------------------
+    # ==================================================
     # 2. Age Group vs Campaign Response
-    # ----------------------------------------
+    # ==================================================
 
-    age_response = (
-        df.groupby("AgeGroup")["Response_to_Campaign"]
-        .mean()
-        .mul(100)
-        .round(2)
+    age = (
+        df.groupby("AgeGroup")
+        .agg(
+            Total_Customers=("CustID", "count"),
+            Responded=("Response_Flag", "sum"),
+            Response_Rate=("Response_Flag", "mean")
+        )
         .reset_index()
     )
 
-    age_response.columns = [
-        "Age Group",
-        "Response Rate (%)"
-    ]
+    # Convert response rate to percentage
+    age["Response_Rate"] = (
+        age["Response_Rate"] * 100
+    ).round(2)
 
 
-    # ----------------------------------------
-    # 3. Purchase Last Quarter vs Response
-    # ----------------------------------------
+    # ==================================================
+    # 3. Purchase Last Quarter vs Campaign Response
+    # ==================================================
 
-    purchase_response = (
-        df.groupby("purchase_last_quarter_label")[
-            "Response_to_Campaign"
-        ]
-        .mean()
-        .mul(100)
-        .round(2)
+    purchase = (
+        df.groupby("Purchase_Last_Quarter")
+        .agg(
+            Total_Customers=("CustID", "count"),
+            Responded=("Response_Flag", "sum"),
+            Response_Rate=("Response_Flag", "mean")
+        )
         .reset_index()
     )
 
-    purchase_response.columns = [
-        "Purchase in Last Quarter",
-        "Response Rate (%)"
-    ]
+    # Convert response rate to percentage
+    purchase["Response_Rate"] = (
+        purchase["Response_Rate"] * 100
+    ).round(2)
 
 
-    # ----------------------------------------
+    # ==================================================
     # 4. Product Usage vs Campaign Response
-    # ----------------------------------------
+    # ==================================================
 
-    product_response = (
-        df.groupby("product_usage_group")[
-            "Response_to_Campaign"
-        ]
-        .mean()
-        .mul(100)
-        .round(2)
+    # Create a copy of the dataframe
+    temp_df = df.copy()
+
+    # Categorize customers based on unique products purchased
+    temp_df["Product_Usage"] = pd.cut(
+        temp_df["Unique_Products_Purchased"],
+        bins=[0, 4, 8, float("inf")],
+        labels=["1-4", "5-8", ">8"]
+    )
+
+    product = (
+        temp_df.groupby(
+            "Product_Usage",
+            observed=False
+        )
+        .agg(
+            Total_Customers=("CustID", "count"),
+            Responded=("Response_Flag", "sum"),
+            Response_Rate=("Response_Flag", "mean")
+        )
         .reset_index()
     )
 
-    product_response.columns = [
-        "Product Usage",
-        "Response Rate (%)"
-    ]
+    # Convert response rate to percentage
+    product["Response_Rate"] = (
+        product["Response_Rate"] * 100
+    ).round(2)
 
 
-    # Convert tables to HTML
+    # ==================================================
+    # Return all analysis tables
+    # ==================================================
 
-    gender_table = gender_response.to_html(index=False)
-    age_table = age_response.to_html(index=False)
-    purchase_table = purchase_response.to_html(index=False)
-    product_table = product_response.to_html(index=False)
+    return {
+        "gender_analysis":
+            gender.to_dict(orient="records"),
 
+        "age_analysis":
+            age.to_dict(orient="records"),
 
-    # ----------------------------------------
-    # HTML page
-    # ----------------------------------------
+        "purchase_analysis":
+            purchase.to_dict(orient="records"),
 
-    html = f"""
-    <html>
-
-    <head>
-
-        <title>Skin Clinic Campaign Analysis</title>
-
-        <style>
-
-            body {{
-                font-family: Arial, sans-serif;
-                margin: 40px;
-                background-color: #f5f5f5;
-            }}
-
-            h1 {{
-                text-align: center;
-            }}
-
-            h2 {{
-                margin-top: 40px;
-            }}
-
-            table {{
-                border-collapse: collapse;
-                width: 600px;
-                background-color: white;
-            }}
-
-            th, td {{
-                border: 1px solid #cccccc;
-                padding: 10px;
-                text-align: center;
-            }}
-
-            th {{
-                background-color: #333333;
-                color: white;
-            }}
-
-        </style>
-
-    </head>
-
-
-    <body>
-
-        <h1>Skin Clinic Campaign Analysis</h1>
-
-
-        <h2>1. Gender vs Campaign Response</h2>
-
-        {gender_table}
-
-
-        <h2>2. Age Group vs Campaign Response</h2>
-
-        {age_table}
-
-
-        <h2>3. Purchase in Last Quarter vs Campaign Response</h2>
-
-        {purchase_table}
-
-
-        <h2>4. Product Usage vs Campaign Response</h2>
-
-        {product_table}
-
-
-    </body>
-
-    </html>
-    """
-
-    return HTMLResponse(content=html)
+        "product_usage_analysis":
+            product.to_dict(orient="records")
+    }
